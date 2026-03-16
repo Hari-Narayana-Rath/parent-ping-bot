@@ -3,7 +3,12 @@ __pycache__/
 *.db
 *.sqlite3
 *.pth
+!parentping.db
+!best_resnet18_arcface_parentping.pth
 .venv/
 venv/
 .env
 .streamlit/secrets.toml
+build/
+dist/
+*.spec

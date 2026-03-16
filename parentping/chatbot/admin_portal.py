@@ -117,42 +117,6 @@ def run_app() -> None:
             st.session_state.admin_token = ""
             st.rerun()
 
-    with st.expander("Upload Model File", expanded=False):
-        model_file = st.file_uploader("ArcFace Model (.pth)", type=["pth"], key="admin_model_file")
-        if st.button("Upload Model", key="upload_model_button"):
-            if not model_file:
-                st.error("Select a model file.")
-            else:
-                response = requests.post(
-                    f"{API_BASE_URL}/admin/upload_model",
-                    headers={"Authorization": f"Bearer {st.session_state.admin_token}"},
-                    files={"model_file": (model_file.name, model_file.getvalue(), "application/octet-stream")},
-                    timeout=300,
-                )
-                if response.ok:
-                    st.success(response.json().get("message", "Model uploaded successfully."))
-                else:
-                    st.error(_response_detail(response))
-
-    with st.expander("Import Private Data", expanded=False):
-        data_file = st.file_uploader("Private Data Export (.json)", type=["json"], key="admin_import_file")
-        replace_existing = st.checkbox("Replace existing hosted data", key="replace_existing_data")
-        if st.button("Import Data", key="import_data_button"):
-            if not data_file:
-                st.error("Select a JSON export file.")
-            else:
-                response = requests.post(
-                    f"{API_BASE_URL}/admin/import_data",
-                    headers={"Authorization": f"Bearer {st.session_state.admin_token}"},
-                    files={"data_file": (data_file.name, data_file.getvalue(), "application/json")},
-                    data={"replace_existing": str(replace_existing).lower()},
-                    timeout=300,
-                )
-                if response.ok:
-                    st.success(response.json().get("message", "Data imported successfully."))
-                else:
-                    st.error(_response_detail(response))
-
     st.markdown("**Register Student**")
     with st.form("register_student_form"):
         name = st.text_input("Student Name")
