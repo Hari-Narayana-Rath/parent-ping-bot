@@ -10,21 +10,34 @@ Backend:
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Streamlit UI:
+Parent portal:
 
 ```bash
-streamlit run streamlit_app.py
+streamlit run parent_portal.py
+```
+
+Admin portal:
+
+```bash
+streamlit run admin_portal.py
+```
+
+Camera app:
+
+```bash
+streamlit run camera_portal.py
 ```
 
 ## Streamlit Cloud
 
-Deploy the repository with app file:
+Deploy separate apps with separate entry files:
 
 ```text
-streamlit_app.py
+parent_portal.py
+admin_portal.py
 ```
 
-Add this secret in Streamlit Cloud:
+Add this secret in each Streamlit Cloud app:
 
 ```toml
 api_base_url = "https://your-backend-url"

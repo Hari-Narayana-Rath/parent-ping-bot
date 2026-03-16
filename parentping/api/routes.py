@@ -53,13 +53,18 @@ class MarkAttendanceRequest(BaseModel):
 
 
 class ParentLoginRequest(BaseModel):
-    email: EmailStr
+    roll_number: str = Field(..., min_length=1, max_length=64)
     password: str
 
 
 class AdminLoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class ResetParentPasswordRequest(BaseModel):
+    student_id: int
+    new_password: str = Field(..., min_length=6, max_length=128)
 
 
 class ChatbotQueryRequest(BaseModel):
@@ -157,6 +162,15 @@ def _register_student_internal(
         "message": "Student and parent registered successfully.",
         "student_id": student.id,
         "parent_id": parent.id,
+    }
+
+
+def _student_payload(student: Student) -> dict[str, Any]:
+    return {
+        "id": student.id,
+        "name": student.name,
+        "roll_number": student.roll_number,
+        "parent_email": student.parent_email,
     }
 
 
@@ -340,10 +354,13 @@ def get_attendance_history(
 
 @router.post("/login_parent")
 def login_parent(request: ParentLoginRequest, db: Session = Depends(get_db)):
-    parent = db.query(Parent).filter(Parent.email == request.email).first()
+    student = db.query(Student).filter(Student.roll_number == request.roll_number.strip()).first()
+    if not student:
+        raise HTTPException(status_code=401, detail="Invalid roll number or password.")
+
+    parent = db.query(Parent).filter(Parent.student_id == student.id).first()
     if not parent or not _verify_password(request.password, parent.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password.")
-    student = db.query(Student).filter(Student.id == parent.student_id).first()
+        raise HTTPException(status_code=401, detail="Invalid roll number or password.")
 
     token = _create_access_token({"sub": str(parent.id), "role": "parent"})
     return {
@@ -368,6 +385,43 @@ def login_admin(request: AdminLoginRequest):
         "token_type": "bearer",
         "admin_email": ADMIN_EMAIL,
     }
+
+
+@router.get("/admin/students")
+def list_students(
+    _: dict[str, Any] = Depends(_get_current_admin),
+    db: Session = Depends(get_db),
+):
+    students = db.query(Student).order_by(Student.name.asc()).all()
+    return [_student_payload(student) for student in students]
+
+
+@router.post("/admin/reset_parent_password")
+def reset_parent_password(
+    request: ResetParentPasswordRequest,
+    _: dict[str, Any] = Depends(_get_current_admin),
+    db: Session = Depends(get_db),
+):
+    parent = db.query(Parent).filter(Parent.student_id == request.student_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent record not found for this student.")
+    parent.password_hash = _hash_password(request.new_password)
+    db.commit()
+    return {"message": "Parent password updated successfully."}
+
+
+@router.delete("/admin/student/{student_id}")
+def delete_student(
+    student_id: int,
+    _: dict[str, Any] = Depends(_get_current_admin),
+    db: Session = Depends(get_db),
+):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found.")
+    db.delete(student)
+    db.commit()
+    return {"message": "Student removed successfully."}
 
 
 @router.post("/admin/upload_model")
