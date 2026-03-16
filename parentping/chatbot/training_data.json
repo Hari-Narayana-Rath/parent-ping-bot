@@ -1,0 +1,87 @@
+{
+  "status": [
+    "is attendance marked for today",
+    "today attendance update please",
+    "can you confirm attendance for yesterday",
+    "was my child absent today",
+    "tell me present or absent for today"
+  ],
+  "entry_time": [
+    "when did my child check in today",
+    "today check in time",
+    "entry timestamp for yesterday",
+    "when did attendance start today"
+  ],
+  "exit_time": [
+    "when did my child check out today",
+    "today check out time",
+    "exit timestamp for yesterday",
+    "what is logout time from class"
+  ],
+  "in_class": [
+    "is my child still inside class",
+    "is the student currently in classroom now",
+    "live class status yes or no",
+    "in classroom right now?"
+  ],
+  "weekly_summary": [
+    "give weekly attendance details",
+    "weekly report",
+    "attendance log for this week"
+  ],
+  "weekly_count": [
+    "how many present days this week",
+    "weekly present count",
+    "week wise total days marked"
+  ],
+  "weekly_percentage": [
+    "weekly attendance percent",
+    "week percentage attendance",
+    "how much attendance this week"
+  ],
+  "monthly_summary": [
+    "give month attendance details",
+    "monthly report",
+    "attendance log for this month"
+  ],
+  "monthly_count": [
+    "how many present days this month",
+    "monthly present count",
+    "month wise total days marked"
+  ],
+  "monthly_percentage": [
+    "monthly attendance percent",
+    "month percentage attendance",
+    "how much attendance this month"
+  ],
+  "yearly_summary": [
+    "annual attendance summary",
+    "year report attendance",
+    "this year attendance details"
+  ],
+  "yearly_percentage": [
+    "annual attendance percentage",
+    "yearly attendance rate",
+    "attendance percentage this year"
+  ],
+  "latest_update": [
+    "latest attendance information",
+    "most recent attendance log",
+    "show latest attendance status"
+  ],
+  "date_range_summary": [
+    "from 2026-01-01 to 2026-01-31 attendance summary",
+    "give attendance summary between two dates",
+    "range summary for attendance"
+  ],
+  "date_range_list": [
+    "show attendance between two dates",
+    "list attendance from date to date",
+    "attendance history for date range"
+  ],
+  "help": [
+    "show me what details you can provide",
+    "how can this chatbot help me",
+    "available attendance queries"
+  ]
+}

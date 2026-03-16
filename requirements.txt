@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+torch
+torchvision
+opencv-python
+numpy
+sqlalchemy
+pydantic
+scikit-learn
+python-jose[cryptography]
+passlib
+email-validator
+streamlit
+python-multipart
+requests
