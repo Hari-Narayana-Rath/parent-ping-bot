@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import os
 import time
 from typing import Any, Dict
 
@@ -9,7 +8,7 @@ import requests
 import streamlit as st
 
 
-API_BASE_URL = ""
+API_BASE_URL = "https://parentping-api.onrender.com"
 REQUEST_TIMEOUT_SECONDS = 75
 
 
@@ -108,20 +107,12 @@ def _get_classroom_status() -> tuple[bool, str]:
 
 
 def run_app() -> None:
-    global API_BASE_URL
     _init_state()
 
     st.set_page_config(page_title="ParentPing Chat Bot", layout="wide")
     st.title("ParentPing Chat Bot")
     st.caption("Parent-only attendance assistant")
 
-    default_api_base_url = os.getenv("PARENTPING_API_BASE_URL", "")
-    try:
-        default_api_base_url = st.secrets.get("api_base_url", default_api_base_url)
-    except Exception:
-        pass
-
-    API_BASE_URL = st.sidebar.text_input("API Base URL", value=default_api_base_url).rstrip("/")
     st.markdown(
         """
         <style>
@@ -150,7 +141,7 @@ def run_app() -> None:
     )
 
     if not API_BASE_URL:
-        st.error("API Base URL is not configured.")
+        st.error("Application backend is not configured. Contact the administrator.")
         return
 
     if not st.session_state.parent_token:
