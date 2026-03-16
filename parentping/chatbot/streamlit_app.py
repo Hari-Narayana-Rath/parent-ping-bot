@@ -56,6 +56,8 @@ def _get_json(path: str, token: str | None = None) -> Any:
 
 if "token" not in st.session_state:
     st.session_state.token = ""
+if "admin_token" not in st.session_state:
+    st.session_state.admin_token = ""
 if "student_id" not in st.session_state:
     st.session_state.student_id = None
 if "student_name" not in st.session_state:
@@ -183,10 +185,81 @@ def _render_parent_chatbot() -> None:
 
 def _render_admin_registration() -> None:
     st.subheader("Admin Registration")
-    st.caption("Register a student using a multi-angle face video")
     if not API_BASE_URL:
         st.error("API Base URL is not configured. Set it in the sidebar or Streamlit secrets.")
         return
+    if not st.session_state.admin_token:
+        with st.form("admin_login_form", clear_on_submit=False):
+            admin_email = st.text_input("Admin Email")
+            admin_password = st.text_input("Admin Password", type="password")
+            admin_submitted = st.form_submit_button("Admin Login")
+            if admin_submitted:
+                try:
+                    result = _post_json("/login_admin", {"email": admin_email, "password": admin_password})
+                    st.session_state.admin_token = result["access_token"]
+                    st.success("Admin login successful.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        st.info("Admin login is required for private model upload and student import.")
+        return
+
+    top_left, top_right = st.columns([4, 1])
+    with top_left:
+        st.caption("Secure admin tools for hosted backend setup")
+    with top_right:
+        if st.button("Admin Logout"):
+            st.session_state.admin_token = ""
+            st.rerun()
+
+    st.markdown("**Upload Model File**")
+    with st.form("upload_model_form"):
+        model_file = st.file_uploader("ArcFace Model (.pth)", type=["pth"], key="model_upload")
+        model_submitted = st.form_submit_button("Upload Model")
+        if model_submitted:
+            if not model_file:
+                st.error("Select a .pth model file.")
+            else:
+                try:
+                    response = requests.post(
+                        f"{API_BASE_URL}/admin/upload_model",
+                        headers={"Authorization": f"Bearer {st.session_state.admin_token}"},
+                        files={"model_file": (model_file.name, model_file.getvalue(), "application/octet-stream")},
+                        timeout=300,
+                    )
+                    if response.ok:
+                        st.success(response.json().get("message", "Model uploaded successfully."))
+                    else:
+                        st.error(response.json().get("detail", response.text))
+                except Exception as exc:
+                    st.error(f"Upload failed: {exc}")
+
+    st.markdown("**Import Private Data**")
+    with st.form("import_data_form"):
+        data_file = st.file_uploader("Private Data Export (.json)", type=["json"], key="data_import")
+        replace_existing = st.checkbox("Replace existing hosted data")
+        import_submitted = st.form_submit_button("Import Data")
+        if import_submitted:
+            if not data_file:
+                st.error("Select a JSON export file.")
+            else:
+                try:
+                    response = requests.post(
+                        f"{API_BASE_URL}/admin/import_data",
+                        headers={"Authorization": f"Bearer {st.session_state.admin_token}"},
+                        files={"data_file": (data_file.name, data_file.getvalue(), "application/json")},
+                        data={"replace_existing": str(replace_existing).lower()},
+                        timeout=300,
+                    )
+                    if response.ok:
+                        st.success(response.json().get("message", "Data imported successfully."))
+                    else:
+                        st.error(response.json().get("detail", response.text))
+                except Exception as exc:
+                    st.error(f"Import failed: {exc}")
+
+    st.markdown("**Register Student From Video**")
+    st.caption("Register a student using a multi-angle face video")
     with st.form("register_video_form"):
         name = st.text_input("Student Name")
         roll_number = st.text_input("Roll Number")
@@ -216,6 +289,7 @@ def _render_admin_registration() -> None:
         try:
             response = requests.post(
                 f"{API_BASE_URL}/register_student_from_video",
+                headers={"Authorization": f"Bearer {st.session_state.admin_token}"},
                 data=data,
                 files=files,
                 timeout=180,

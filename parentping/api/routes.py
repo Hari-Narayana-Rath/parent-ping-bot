@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 import cv2
 import numpy as np
@@ -33,6 +34,8 @@ SECRET_KEY = os.getenv("PARENTPING_SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 MODEL_PATH = os.getenv("PARENTPING_MODEL_PATH", "best_resnet18_arcface_parentping.pth")
+ADMIN_EMAIL = os.getenv("PARENTPING_ADMIN_EMAIL", "")
+ADMIN_PASSWORD = os.getenv("PARENTPING_ADMIN_PASSWORD", "")
 _detector: FaceDetector | None = None
 _extractor: EmbeddingExtractor | None = None
 
@@ -50,6 +53,11 @@ class MarkAttendanceRequest(BaseModel):
 
 
 class ParentLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class AdminLoginRequest(BaseModel):
     email: EmailStr
     password: str
 
@@ -86,6 +94,8 @@ def _get_current_parent(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("role") != "parent":
+            raise credentials_exception
         parent_id = int(payload.get("sub"))
     except (JWTError, TypeError, ValueError):
         raise credentials_exception
@@ -94,6 +104,21 @@ def _get_current_parent(
     if not parent:
         raise credentials_exception
     return parent
+
+
+def _get_current_admin(token: str = Depends(oauth2_scheme)) -> dict[str, Any]:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Admin authentication required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("role") != "admin":
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    return payload
 
 
 def _register_student_internal(
@@ -189,7 +214,11 @@ def _embedding_from_video(video_path: Path) -> np.ndarray:
 
 
 @router.post("/register_student")
-def register_student(request: RegisterStudentRequest, db: Session = Depends(get_db)):
+def register_student(
+    request: RegisterStudentRequest,
+    _: dict[str, Any] = Depends(_get_current_admin),
+    db: Session = Depends(get_db),
+):
     embedding = np.array(request.embedding, dtype=np.float32)
     return _register_student_internal(
         name=request.name,
@@ -208,6 +237,7 @@ def register_student_from_video(
     parent_email: str = Form(...),
     parent_password: str = Form(...),
     video: UploadFile = File(...),
+    _: dict[str, Any] = Depends(_get_current_admin),
     db: Session = Depends(get_db),
 ):
     if not video.filename:
@@ -315,7 +345,7 @@ def login_parent(request: ParentLoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     student = db.query(Student).filter(Student.id == parent.student_id).first()
 
-    token = _create_access_token({"sub": str(parent.id)})
+    token = _create_access_token({"sub": str(parent.id), "role": "parent"})
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -323,6 +353,111 @@ def login_parent(request: ParentLoginRequest, db: Session = Depends(get_db)):
         "student_name": student.name if student else None,
         "roll_number": student.roll_number if student else None,
     }
+
+
+@router.post("/login_admin")
+def login_admin(request: AdminLoginRequest):
+    if not ADMIN_EMAIL or not ADMIN_PASSWORD:
+        raise HTTPException(status_code=503, detail="Admin credentials are not configured.")
+    if request.email != ADMIN_EMAIL or request.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid admin email or password.")
+
+    token = _create_access_token({"sub": ADMIN_EMAIL, "role": "admin"})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "admin_email": ADMIN_EMAIL,
+    }
+
+
+@router.post("/admin/upload_model")
+def upload_model_file(
+    model_file: UploadFile = File(...),
+    _: dict[str, Any] = Depends(_get_current_admin),
+):
+    if not model_file.filename or not model_file.filename.endswith(".pth"):
+        raise HTTPException(status_code=400, detail="Upload a valid .pth model file.")
+
+    destination = Path(MODEL_PATH)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("wb") as output:
+        shutil.copyfileobj(model_file.file, output)
+
+    global _detector, _extractor
+    _detector = None
+    _extractor = None
+    return {"message": f"Model uploaded successfully to {destination.name}."}
+
+
+@router.post("/admin/import_data")
+def import_private_data(
+    data_file: UploadFile = File(...),
+    replace_existing: bool = Form(False),
+    _: dict[str, Any] = Depends(_get_current_admin),
+    db: Session = Depends(get_db),
+):
+    if not data_file.filename or not data_file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Upload a valid JSON export file.")
+
+    try:
+        payload = json.loads(data_file.file.read().decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not parse JSON import file.")
+
+    students_payload = payload.get("students", [])
+    if not isinstance(students_payload, list):
+        raise HTTPException(status_code=400, detail="Import file is missing a valid students list.")
+
+    if replace_existing:
+        db.query(Attendance).delete()
+        db.query(Parent).delete()
+        db.query(Student).delete()
+        db.commit()
+
+    imported = 0
+    for item in students_payload:
+        if not isinstance(item, dict):
+            continue
+
+        embedding = np.array(item.get("embedding", []), dtype=np.float32)
+        if embedding.size != 512:
+            continue
+
+        existing = db.query(Student).filter(Student.roll_number == item.get("roll_number")).first()
+        if existing:
+            continue
+
+        result = _register_student_internal(
+            name=str(item.get("name", "")).strip(),
+            roll_number=str(item.get("roll_number", "")).strip(),
+            parent_email=str(item.get("parent_email", "")).strip(),
+            parent_password=str(item.get("parent_password", "")).strip(),
+            embedding=embedding,
+            db=db,
+        )
+        student_id = int(result["student_id"])
+
+        attendance_items = item.get("attendance", [])
+        for attendance in attendance_items:
+            if not isinstance(attendance, dict):
+                continue
+            try:
+                record = Attendance(
+                    student_id=student_id,
+                    date=dt.date.fromisoformat(attendance["date"]),
+                    time_in=dt.datetime.fromisoformat(attendance["time_in"]),
+                    time_out=dt.datetime.fromisoformat(attendance["time_out"])
+                    if attendance.get("time_out")
+                    else None,
+                    status=str(attendance.get("status", "Present")),
+                )
+                db.add(record)
+            except Exception:
+                continue
+        db.commit()
+        imported += 1
+
+    return {"message": f"Imported {imported} student records."}
 
 
 @router.post("/chatbot_query")
