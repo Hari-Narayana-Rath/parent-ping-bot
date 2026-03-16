@@ -8,49 +8,7 @@ import requests
 import streamlit as st
 
 
-st.set_page_config(page_title="ParentPing Portal", layout="wide")
-st.title("ParentPing Portal")
-st.caption("Parent chatbot and student registration")
-
-DEFAULT_API_BASE_URL = os.getenv("PARENTPING_API_BASE_URL", "")
-try:
-    DEFAULT_API_BASE_URL = st.secrets.get("api_base_url", DEFAULT_API_BASE_URL)
-except Exception:
-    pass
-
-API_BASE_URL = st.sidebar.text_input("API Base URL", value=DEFAULT_API_BASE_URL).rstrip("/")
-mode = st.sidebar.radio("Mode", ["Parent Chatbot", "Admin Registration"])
-st.markdown(
-    """
-<style>
-.status-card {
-  border: 1px solid #dfe5ec;
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: linear-gradient(180deg, #ffffff, #f8fafc);
-  animation: fadeIn 0.5s ease-out;
-}
-.status-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-right: 8px;
-  animation: pulse 1.6s infinite;
-}
-@keyframes pulse {
-  0% { transform: scale(0.9); opacity: 0.9; }
-  50% { transform: scale(1.1); opacity: 0.65; }
-  100% { transform: scale(0.9); opacity: 0.9; }
-}
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-</style>
-    """,
-    unsafe_allow_html=True,
-)
+API_BASE_URL = ""
 
 
 def _post_json(path: str, payload: Dict[str, Any], token: str | None = None) -> Dict[str, Any]:
@@ -279,7 +237,59 @@ def _render_admin_registration() -> None:
             st.error(f"Request failed: {exc}")
 
 
-if mode == "Parent Chatbot":
-    _render_parent_chatbot()
-else:
-    _render_admin_registration()
+def run_app() -> None:
+    global API_BASE_URL
+
+    st.set_page_config(page_title="ParentPing Portal", layout="wide")
+    st.title("ParentPing Portal")
+    st.caption("Parent chatbot and student registration")
+
+    default_api_base_url = os.getenv("PARENTPING_API_BASE_URL", "")
+    try:
+        default_api_base_url = st.secrets.get("api_base_url", default_api_base_url)
+    except Exception:
+        pass
+
+    API_BASE_URL = st.sidebar.text_input("API Base URL", value=default_api_base_url).rstrip("/")
+    mode = st.sidebar.radio("Mode", ["Parent Chatbot", "Admin Registration"])
+
+    st.markdown(
+        """
+    <style>
+    .status-card {
+      border: 1px solid #dfe5ec;
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: linear-gradient(180deg, #ffffff, #f8fafc);
+      animation: fadeIn 0.5s ease-out;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+      animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.9); opacity: 0.9; }
+      50% { transform: scale(1.1); opacity: 0.65; }
+      100% { transform: scale(0.9); opacity: 0.9; }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if mode == "Parent Chatbot":
+        _render_parent_chatbot()
+    else:
+        _render_admin_registration()
+
+
+if __name__ == "__main__":
+    run_app()
