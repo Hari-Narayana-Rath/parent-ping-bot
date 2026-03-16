@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict
 
 import requests
@@ -8,56 +9,65 @@ import streamlit as st
 
 
 API_BASE_URL = ""
+REQUEST_TIMEOUT_SECONDS = 75
+
+
+def _request_json(method: str, path: str, token: str | None = None, **kwargs: Any) -> Any:
+    if not API_BASE_URL:
+        raise RuntimeError("API Base URL is not configured.")
+    headers = kwargs.pop("headers", {})
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    url = f"{API_BASE_URL}{path}"
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            response = requests.request(
+                method,
+                url,
+                headers=headers,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+                **kwargs,
+            )
+            if not response.ok:
+                detail = response.text
+                try:
+                    detail = response.json().get("detail", detail)
+                except Exception:
+                    pass
+                raise RuntimeError(f"HTTP {response.status_code}: {detail}")
+            return response.json()
+        except requests.exceptions.Timeout as exc:
+            last_error = exc
+            if attempt == 0:
+                time.sleep(3)
+                continue
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if isinstance(last_error, requests.exceptions.Timeout):
+        raise RuntimeError(
+            "The backend is taking too long to respond. "
+            "If Render is on the free tier, wait about a minute and try again."
+        )
+    if last_error:
+        raise RuntimeError(str(last_error))
+    raise RuntimeError("Unknown request failure.")
 
 
 def _post_json(path: str, payload: Dict[str, Any], token: str | None = None) -> Dict[str, Any]:
-    if not API_BASE_URL:
-        raise RuntimeError("API Base URL is not configured.")
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    response = requests.post(f"{API_BASE_URL}{path}", json=payload, headers=headers, timeout=30)
-    if not response.ok:
-        detail = response.text
-        try:
-            detail = response.json().get("detail", detail)
-        except Exception:
-            pass
-        raise RuntimeError(f"HTTP {response.status_code}: {detail}")
-    return response.json()
+    return _request_json("POST", path, token=token, json=payload)
 
 
 def _get_json(path: str, token: str | None = None) -> Any:
-    if not API_BASE_URL:
-        raise RuntimeError("API Base URL is not configured.")
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    response = requests.get(f"{API_BASE_URL}{path}", headers=headers, timeout=30)
-    if not response.ok:
-        detail = response.text
-        try:
-            detail = response.json().get("detail", detail)
-        except Exception:
-            pass
-        raise RuntimeError(f"HTTP {response.status_code}: {detail}")
-    return response.json()
+    return _request_json("GET", path, token=token)
 
 
 def _delete_student(student_id: int, token: str) -> str:
-    response = requests.delete(
-        f"{API_BASE_URL}/admin/student/{student_id}",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=30,
-    )
-    if not response.ok:
-        detail = response.text
-        try:
-            detail = response.json().get("detail", detail)
-        except Exception:
-            pass
-        raise RuntimeError(f"HTTP {response.status_code}: {detail}")
-    return response.json().get("message", "Student removed successfully.")
+    response = _request_json("DELETE", f"/admin/student/{student_id}", token=token)
+    return response.get("message", "Student removed successfully.")
 
 
 def _init_state() -> None:
