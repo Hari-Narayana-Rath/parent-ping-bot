@@ -177,7 +177,13 @@ def _student_payload(student: Student) -> dict[str, Any]:
 def _get_recognition_components() -> tuple[FaceDetector, EmbeddingExtractor]:
     global _detector, _extractor
     if _detector is None or _extractor is None:
-        model, device = load_embedding_model(MODEL_PATH)
+        try:
+            model, device = load_embedding_model(MODEL_PATH)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=400,
+                detail="Model file is not available on the backend. Upload the .pth file from the admin portal first.",
+            )
         _detector = FaceDetector(use_retinaface=False)
         _extractor = EmbeddingExtractor(model=model, device=device)
     return _detector, _extractor

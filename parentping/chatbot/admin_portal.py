@@ -56,6 +56,16 @@ def _request_json(method: str, path: str, token: str | None = None, **kwargs: An
     raise RuntimeError("Unknown request failure.")
 
 
+def _response_detail(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            return str(payload.get("detail", response.text))
+    except Exception:
+        pass
+    return response.text.strip() or f"HTTP {response.status_code}"
+
+
 def _post_json(path: str, payload: Dict[str, Any], token: str | None = None) -> Dict[str, Any]:
     return _request_json("POST", path, token=token, json=payload)
 
@@ -122,7 +132,7 @@ def run_app() -> None:
                 if response.ok:
                     st.success(response.json().get("message", "Model uploaded successfully."))
                 else:
-                    st.error(response.json().get("detail", response.text))
+                    st.error(_response_detail(response))
 
     with st.expander("Import Private Data", expanded=False):
         data_file = st.file_uploader("Private Data Export (.json)", type=["json"], key="admin_import_file")
@@ -141,7 +151,7 @@ def run_app() -> None:
                 if response.ok:
                     st.success(response.json().get("message", "Data imported successfully."))
                 else:
-                    st.error(response.json().get("detail", response.text))
+                    st.error(_response_detail(response))
 
     st.markdown("**Register Student**")
     with st.form("register_student_form"):
@@ -174,7 +184,7 @@ def run_app() -> None:
                 if response.ok:
                     st.success(response.json().get("message", "Student registered successfully."))
                 else:
-                    st.error(response.json().get("detail", response.text))
+                    st.error(_response_detail(response))
 
     st.markdown("**Manage Students**")
     try:
