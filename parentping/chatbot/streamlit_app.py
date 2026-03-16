@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from typing import Any, Dict
 
 import requests
@@ -11,7 +12,13 @@ st.set_page_config(page_title="ParentPing Portal", layout="wide")
 st.title("ParentPing Portal")
 st.caption("Parent chatbot and student registration")
 
-API_BASE_URL = st.sidebar.text_input("API Base URL", value="http://127.0.0.1:8000").rstrip("/")
+DEFAULT_API_BASE_URL = os.getenv("PARENTPING_API_BASE_URL", "")
+try:
+    DEFAULT_API_BASE_URL = st.secrets.get("api_base_url", DEFAULT_API_BASE_URL)
+except Exception:
+    pass
+
+API_BASE_URL = st.sidebar.text_input("API Base URL", value=DEFAULT_API_BASE_URL).rstrip("/")
 mode = st.sidebar.radio("Mode", ["Parent Chatbot", "Admin Registration"])
 st.markdown(
     """
@@ -47,6 +54,8 @@ st.markdown(
 
 
 def _post_json(path: str, payload: Dict[str, Any], token: str | None = None) -> Dict[str, Any]:
+    if not API_BASE_URL:
+        raise RuntimeError("API Base URL is not configured.")
     headers = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -67,6 +76,8 @@ def _post_json(path: str, payload: Dict[str, Any], token: str | None = None) -> 
 
 
 def _get_json(path: str, token: str | None = None) -> Any:
+    if not API_BASE_URL:
+        raise RuntimeError("API Base URL is not configured.")
     headers = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -136,6 +147,9 @@ def _get_classroom_status() -> tuple[bool, str]:
 
 def _render_parent_chatbot() -> None:
     st.subheader("Parent Chatbot")
+    if not API_BASE_URL:
+        st.error("API Base URL is not configured. Set it in the sidebar or Streamlit secrets.")
+        return
     if not st.session_state.token:
         with st.form("login_form", clear_on_submit=False):
             email = st.text_input("Parent Email")
@@ -212,6 +226,9 @@ def _render_parent_chatbot() -> None:
 def _render_admin_registration() -> None:
     st.subheader("Admin Registration")
     st.caption("Register a student using a multi-angle face video")
+    if not API_BASE_URL:
+        st.error("API Base URL is not configured. Set it in the sidebar or Streamlit secrets.")
+        return
     with st.form("register_video_form"):
         name = st.text_input("Student Name")
         roll_number = st.text_input("Roll Number")
