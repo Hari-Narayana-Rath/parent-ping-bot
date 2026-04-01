@@ -202,12 +202,12 @@ def _snapshot_to_classroom_label(snap: Optional[Dict[str, Any]]) -> Tuple[bool, 
         return False, "Unknown"
     if snap.get("live_tracking_enabled"):
         if not snap.get("camera_active"):
-            return False, "Camera offline — run camera on classroom PC"
+            return False, "Camera offline — PC must POST to same API URL as this app"
         if snap.get("student_visible_live"):
             return True, "Yes — seen on webcam now"
         return False, "No — not in webcam view"
     if not snap.get("has_record"):
-        return False, "Not checked in yet"
+        return False, "No attendance yet (live webcam needs secret on API — see below)"
     if snap.get("in_class"):
         return True, "Yes — checked in (attendance)"
     return False, "Checked out"
@@ -347,6 +347,15 @@ def run_app() -> None:
             """,
             unsafe_allow_html=True,
         )
+        if snap and snap.get("live_tracking_enabled") is not True:
+            st.info(
+                "**Live webcam status is turned off on the API.** "
+                "On Render: add environment variable `PARENTPING_CAMERA_SECRET` (any long random string) and **redeploy**. "
+                "On the classroom PC: run the camera with **`--api https://YOUR-RENDER-URL`** (not `localhost`) "
+                "and the **same** secret in Camera secret / `--camera-secret`. "
+                "Until then, this line only reflects **database attendance**, not the webcam. "
+                "If live is on but stays **No**, the student **id** in the camera PC database must match the id in Render for this child."
+            )
 
     if _fragment_supported():
         @st.fragment(run_every=POLL_INTERVAL)
