@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from parentping.chatbot.chatbot_logic import handle_chatbot_query
 from parentping.database.db import get_db
+from parentping.timeutil import calendar_today_in_display_tz, format_iso_ist, utc_now_naive
 from parentping.database.models import Attendance, Parent, Student, serialize_embedding
 from parentping.models.embedding_model import load_embedding_model
 from parentping.recognition.embedding_extractor import EmbeddingExtractor
@@ -299,8 +300,8 @@ def mark_attendance(request: MarkAttendanceRequest, db: Session = Depends(get_db
     if not student:
         raise HTTPException(status_code=404, detail="Student not found.")
 
-    now = dt.datetime.now()
-    today = now.date()
+    now = utc_now_naive()
+    today = calendar_today_in_display_tz()
     existing = (
         db.query(Attendance)
         .filter(Attendance.student_id == request.student_id, Attendance.date == today)
@@ -350,8 +351,8 @@ def get_attendance_history(
             "id": rec.id,
             "student_id": rec.student_id,
             "date": rec.date.isoformat(),
-            "time_in": rec.time_in.isoformat(),
-            "time_out": rec.time_out.isoformat() if rec.time_out else None,
+            "time_in": format_iso_ist(rec.time_in),
+            "time_out": format_iso_ist(rec.time_out),
             "status": rec.status,
         }
         for rec in records
@@ -368,7 +369,7 @@ def get_attendance_today(
     if parent.student_id != student_id:
         raise HTTPException(status_code=403, detail="Not authorized for this student.")
 
-    today = dt.datetime.now().date()
+    today = calendar_today_in_display_tz()
     rec = (
         db.query(Attendance)
         .filter(Attendance.student_id == student_id, Attendance.date == today)
@@ -384,12 +385,12 @@ def get_attendance_today(
             "status": None,
             "in_class": False,
         }
-    time_out = rec.time_out.isoformat() if rec.time_out else None
+    time_out = format_iso_ist(rec.time_out)
     in_class = rec.time_out is None
     return {
         "date": rec.date.isoformat(),
         "has_record": True,
-        "time_in": rec.time_in.isoformat(),
+        "time_in": format_iso_ist(rec.time_in),
         "time_out": time_out,
         "status": rec.status,
         "in_class": in_class,

@@ -10,6 +10,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from parentping.database.models import Attendance, Student
+from parentping.timeutil import calendar_today_in_display_tz, format_line_ist
 
 
 DEFAULT_INTENT_EXAMPLES: dict[str, list[str]] = {
@@ -56,7 +57,8 @@ def _format_date(value: dt.date) -> str:
 
 
 def _format_time(value: dt.datetime | None) -> str:
-    return value.strftime("%H:%M:%S") if value else "N/A"
+    """Stored DB times are naive UTC; show IST for parents."""
+    return format_line_ist(value)
 
 
 def _normalize(text: str) -> str:
@@ -177,7 +179,7 @@ def _detect_intent(text: str) -> str:
 
 def _build_context(student: Student, query: str) -> ChatContext:
     normalized = _normalize(query)
-    today = dt.date.today()
+    today = calendar_today_in_display_tz()
     yesterday = today - dt.timedelta(days=1)
     explicit_date = _extract_date(normalized)
     target_day = today
@@ -233,7 +235,8 @@ def generate_response(query: str, student_id: int, db: Session) -> str:
             return f"No attendance is marked for {ctx.day_phrase}."
         return (
             f"Attendance is marked for {ctx.day_phrase}. "
-            f"Status: {record.status}. In {_format_time(record.time_in)}, Out {_format_time(record.time_out)}."
+            f"Status: {record.status}. "
+            f"In {_format_time(record.time_in)}, out {_format_time(record.time_out)}."
         )
     if intent == "entry_time":
         record = _record_for_day(ctx.student.id, ctx.target_day, db)
