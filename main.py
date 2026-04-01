@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -26,7 +28,12 @@ def on_startup() -> None:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "camera_presence_configured": bool(
+            os.getenv("PARENTPING_CAMERA_SECRET", "").strip()
+        ),
+    }
 
 
 if __name__ == "__main__":

@@ -11,3 +11,6 @@ services:
         value: sqlite:///./parentping.db
       - key: PARENTPING_SECRET_KEY
         generateValue: true
+      # Set the value in the Render dashboard (do not commit secrets). sync: false keeps dashboard edits.
+      - key: PARENTPING_CAMERA_SECRET
+        sync: false

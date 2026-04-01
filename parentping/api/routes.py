@@ -39,7 +39,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 MODEL_PATH = os.getenv("PARENTPING_MODEL_PATH", "best_resnet18_arcface_parentping.pth")
 ADMIN_EMAIL = os.getenv("PARENTPING_ADMIN_EMAIL", "")
 ADMIN_PASSWORD = os.getenv("PARENTPING_ADMIN_PASSWORD", "")
-CAMERA_SECRET = os.getenv("PARENTPING_CAMERA_SECRET", "").strip()
+def _get_camera_secret() -> str:
+    """Read on each use so a redeploy/env change is reflected without relying on import-time caching."""
+    return os.getenv("PARENTPING_CAMERA_SECRET", "").strip()
+
+
 PRESENCE_TTL_SEC = float(os.getenv("PARENTPING_PRESENCE_TTL_SEC", "3.5"))
 CAMERA_STALE_SEC = float(os.getenv("PARENTPING_CAMERA_STALE_SEC", "12"))
 
@@ -53,7 +57,7 @@ _extractor: EmbeddingExtractor | None = None
 
 def _presence_fields_for_student(student_id: int) -> dict[str, Any]:
     """Live classroom view: camera pushes visible student IDs; parent polls here."""
-    if not CAMERA_SECRET:
+    if not _get_camera_secret():
         return {
             "live_tracking_enabled": False,
             "camera_active": False,
@@ -390,12 +394,13 @@ def camera_presence(
     Requires PARENTPING_CAMERA_SECRET on the server and the same value in X-Camera-Secret.
     """
     global CAMERA_LAST_BEAT
-    if not CAMERA_SECRET:
+    secret = _get_camera_secret()
+    if not secret:
         raise HTTPException(
             status_code=503,
             detail="Set PARENTPING_CAMERA_SECRET on the API to enable live presence.",
         )
-    if not x_camera_secret or x_camera_secret != CAMERA_SECRET:
+    if not x_camera_secret or x_camera_secret != secret:
         raise HTTPException(status_code=401, detail="Invalid or missing X-Camera-Secret.")
 
     now = time.time()
