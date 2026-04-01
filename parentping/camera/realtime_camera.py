@@ -69,9 +69,12 @@ class RealtimeCameraService:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=3):
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status != 200:
+                    print(f"[ParentPing] mark_attendance HTTP {resp.status}", flush=True)
                 return
-        except Exception:
+        except Exception as exc:
+            print(f"[ParentPing] mark_attendance failed: {exc}", flush=True)
             return
 
     def _recognize_face(self, face_img: np.ndarray, references: Dict[int, np.ndarray]) -> RecognitionResult:

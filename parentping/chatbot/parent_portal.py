@@ -198,13 +198,14 @@ def _fetch_today_snapshot() -> Optional[Dict[str, Any]]:
 
 
 def _snapshot_to_classroom_label(snap: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
+    """in_class is True only when checked in today and not yet checked out (API record)."""
     if not snap:
         return False, "Unknown"
     if not snap.get("has_record"):
-        return False, "No"
+        return False, "Not checked in yet"
     if snap.get("in_class"):
-        return True, "Yes"
-    return False, "No"
+        return True, "Yes — checked in"
+    return False, "Checked out"
 
 
 def _fragment_supported() -> bool:
@@ -216,7 +217,10 @@ def run_app() -> None:
 
     st.set_page_config(page_title="ParentPing Chat Bot", layout="wide")
     st.title("ParentPing Chat Bot")
-    st.caption("Parent-only attendance assistant — session persists across reloads; status updates automatically.")
+    st.caption(
+        "Parent-only attendance assistant — session persists across reloads; status updates automatically. "
+        "**In classroom** uses the attendance record from the camera (check-in / check-out), not live video."
+    )
 
     st.markdown(
         """
@@ -313,7 +317,7 @@ def run_app() -> None:
 
     def _render_status_card(snap: Optional[Dict[str, Any]]) -> None:
         in_class, label = _snapshot_to_classroom_label(snap)
-        color = "#1f9d55" if in_class else "#e03131"
+        color = "#1f9d55" if in_class else ("#64748b" if "Not checked" in label else "#e03131")
         extra = ""
         if snap and snap.get("has_record") and snap.get("time_in"):
             tin = snap.get("time_in", "")

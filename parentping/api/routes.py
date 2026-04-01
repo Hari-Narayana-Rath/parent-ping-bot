@@ -51,6 +51,8 @@ class RegisterStudentRequest(BaseModel):
 
 class MarkAttendanceRequest(BaseModel):
     student_id: int
+    # When True, records end of session (time_out). Camera should only send this for explicit checkout flows.
+    mark_exit: bool = False
 
 
 class ParentLoginRequest(BaseModel):
@@ -309,6 +311,15 @@ def mark_attendance(request: MarkAttendanceRequest, db: Session = Depends(get_db
         .first()
     )
 
+    if request.mark_exit:
+        if not existing:
+            raise HTTPException(status_code=400, detail="No check-in today to close.")
+        if existing.time_out is not None:
+            return {"message": "Check-out already recorded.", "attendance_id": existing.id}
+        existing.time_out = now
+        db.commit()
+        return {"message": "Check-out recorded (time_out).", "attendance_id": existing.id}
+
     if not existing:
         attendance = Attendance(
             student_id=request.student_id,
@@ -322,12 +333,10 @@ def mark_attendance(request: MarkAttendanceRequest, db: Session = Depends(get_db
         db.refresh(attendance)
         return {"message": "Attendance marked (time_in).", "attendance_id": attendance.id}
 
-    if existing.time_out is None and (now - existing.time_in).total_seconds() >= 60:
-        existing.time_out = now
-        db.commit()
-        return {"message": "Attendance updated (time_out).", "attendance_id": existing.id}
+    if existing.time_out is None:
+        return {"message": "Attendance already marked (still checked in).", "attendance_id": existing.id}
 
-    return {"message": "Attendance already marked recently.", "attendance_id": existing.id}
+    return {"message": "Attendance already completed for today.", "attendance_id": existing.id}
 
 
 @router.get("/attendance/{student_id}")
