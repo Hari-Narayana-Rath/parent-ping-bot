@@ -5,12 +5,14 @@ import json
 import os
 import shutil
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any, List
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -37,8 +39,41 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 MODEL_PATH = os.getenv("PARENTPING_MODEL_PATH", "best_resnet18_arcface_parentping.pth")
 ADMIN_EMAIL = os.getenv("PARENTPING_ADMIN_EMAIL", "")
 ADMIN_PASSWORD = os.getenv("PARENTPING_ADMIN_PASSWORD", "")
+CAMERA_SECRET = os.getenv("PARENTPING_CAMERA_SECRET", "").strip()
+PRESENCE_TTL_SEC = float(os.getenv("PARENTPING_PRESENCE_TTL_SEC", "3.5"))
+CAMERA_STALE_SEC = float(os.getenv("PARENTPING_CAMERA_STALE_SEC", "12"))
+
+PRESENCE_LOCK = threading.Lock()
+PRESENCE_LAST_SEEN: dict[int, float] = {}
+CAMERA_LAST_BEAT: float = 0.0
+
 _detector: FaceDetector | None = None
 _extractor: EmbeddingExtractor | None = None
+
+
+def _presence_fields_for_student(student_id: int) -> dict[str, Any]:
+    """Live classroom view: camera pushes visible student IDs; parent polls here."""
+    if not CAMERA_SECRET:
+        return {
+            "live_tracking_enabled": False,
+            "camera_active": False,
+            "student_visible_live": False,
+        }
+    now = time.time()
+    with PRESENCE_LOCK:
+        cam_age = now - CAMERA_LAST_BEAT
+        last_seen = PRESENCE_LAST_SEEN.get(student_id)
+    camera_active = cam_age < CAMERA_STALE_SEC
+    visible = (
+        camera_active
+        and last_seen is not None
+        and (now - last_seen) < PRESENCE_TTL_SEC
+    )
+    return {
+        "live_tracking_enabled": True,
+        "camera_active": camera_active,
+        "student_visible_live": visible,
+    }
 
 
 class RegisterStudentRequest(BaseModel):
@@ -53,6 +88,12 @@ class MarkAttendanceRequest(BaseModel):
     student_id: int
     # When True, records end of session (time_out). Camera should only send this for explicit checkout flows.
     mark_exit: bool = False
+
+
+class CameraPresenceRequest(BaseModel):
+    """Student IDs whose faces were matched in the current webcam frame (up to a few faces)."""
+
+    student_ids: List[int] = Field(default_factory=list)
 
 
 class ParentLoginRequest(BaseModel):
@@ -339,6 +380,33 @@ def mark_attendance(request: MarkAttendanceRequest, db: Session = Depends(get_db
     return {"message": "Attendance already completed for today.", "attendance_id": existing.id}
 
 
+@router.post("/camera/presence")
+def camera_presence(
+    request: CameraPresenceRequest,
+    x_camera_secret: str | None = Header(default=None, alias="X-Camera-Secret"),
+):
+    """
+    Classroom PC calls this every ~0.5s with currently visible matched student IDs.
+    Requires PARENTPING_CAMERA_SECRET on the server and the same value in X-Camera-Secret.
+    """
+    global CAMERA_LAST_BEAT
+    if not CAMERA_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Set PARENTPING_CAMERA_SECRET on the API to enable live presence.",
+        )
+    if not x_camera_secret or x_camera_secret != CAMERA_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Camera-Secret.")
+
+    now = time.time()
+    with PRESENCE_LOCK:
+        CAMERA_LAST_BEAT = now
+        for sid in request.student_ids:
+            if isinstance(sid, int) and sid > 0:
+                PRESENCE_LAST_SEEN[sid] = now
+    return {"ok": True, "count": len(request.student_ids)}
+
+
 @router.get("/attendance/{student_id}")
 def get_attendance_history(
     student_id: int,
@@ -385,6 +453,7 @@ def get_attendance_today(
         .order_by(Attendance.time_in.desc())
         .first()
     )
+    live = _presence_fields_for_student(student_id)
     if not rec:
         return {
             "date": today.isoformat(),
@@ -393,6 +462,7 @@ def get_attendance_today(
             "time_out": None,
             "status": None,
             "in_class": False,
+            **live,
         }
     time_out = format_iso_ist(rec.time_out)
     in_class = rec.time_out is None
@@ -403,6 +473,7 @@ def get_attendance_today(
         "time_out": time_out,
         "status": rec.status,
         "in_class": in_class,
+        **live,
     }
 
 

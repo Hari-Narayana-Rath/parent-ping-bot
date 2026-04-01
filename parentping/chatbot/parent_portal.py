@@ -15,7 +15,7 @@ import streamlit as st
 DEFAULT_API_BASE_URL = os.getenv("PARENTPING_API_BASE_URL", "https://parentping-api.onrender.com")
 REQUEST_TIMEOUT_SECONDS = 75
 SESSION_COOKIE_KEY = "pp_parent_session_v1"
-POLL_INTERVAL = dt.timedelta(seconds=10)
+POLL_INTERVAL = dt.timedelta(seconds=3)
 COOKIE_DAYS = 14
 
 
@@ -198,13 +198,18 @@ def _fetch_today_snapshot() -> Optional[Dict[str, Any]]:
 
 
 def _snapshot_to_classroom_label(snap: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
-    """in_class is True only when checked in today and not yet checked out (API record)."""
     if not snap:
         return False, "Unknown"
+    if snap.get("live_tracking_enabled"):
+        if not snap.get("camera_active"):
+            return False, "Camera offline — run camera on classroom PC"
+        if snap.get("student_visible_live"):
+            return True, "Yes — seen on webcam now"
+        return False, "No — not in webcam view"
     if not snap.get("has_record"):
         return False, "Not checked in yet"
     if snap.get("in_class"):
-        return True, "Yes — checked in"
+        return True, "Yes — checked in (attendance)"
     return False, "Checked out"
 
 
@@ -218,8 +223,9 @@ def run_app() -> None:
     st.set_page_config(page_title="ParentPing Chat Bot", layout="wide")
     st.title("ParentPing Chat Bot")
     st.caption(
-        "Parent-only attendance assistant — session persists across reloads; status updates automatically. "
-        "**In classroom** uses the attendance record from the camera (check-in / check-out), not live video."
+        "Parent-only attendance assistant — session persists across reloads. "
+        "**Student in classroom** uses the **live classroom webcam** when the camera app is running with the same secret as the API; "
+        "otherwise it falls back to attendance check-in / check-out."
     )
 
     st.markdown(
@@ -268,7 +274,9 @@ def run_app() -> None:
                 st.success("Backend URL updated.")
                 st.rerun()
         st.caption(f"Current: `{st.session_state.api_base_url or 'Not set'}`")
-        st.caption("Tip: Open this app on your phone; run the camera app only on the classroom PC.")
+        st.caption(
+            "Tip: use your phone here; on the classroom PC run `camera_portal.py` and set **PARENTPING_CAMERA_SECRET** the same on Render."
+        )
 
     if not st.session_state.api_base_url:
         st.error("Application backend is not configured. Contact the administrator.")
@@ -317,7 +325,14 @@ def run_app() -> None:
 
     def _render_status_card(snap: Optional[Dict[str, Any]]) -> None:
         in_class, label = _snapshot_to_classroom_label(snap)
-        color = "#1f9d55" if in_class else ("#64748b" if "Not checked" in label else "#e03131")
+        if in_class:
+            color = "#1f9d55"
+        elif "offline" in label.lower() or "Camera offline" in label:
+            color = "#94a3b8"
+        elif "Not checked" in label:
+            color = "#64748b"
+        else:
+            color = "#e03131"
         extra = ""
         if snap and snap.get("has_record") and snap.get("time_in"):
             tin = snap.get("time_in", "")

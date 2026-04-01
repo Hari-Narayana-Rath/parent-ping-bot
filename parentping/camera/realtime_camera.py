@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -32,6 +33,9 @@ class RealtimeCameraService:
         api_base_url: str = "http://127.0.0.1:8000",
         threshold: float = 0.125,
         use_retinaface: bool = False,
+        max_faces: int = 3,
+        presence_interval_sec: float = 0.45,
+        camera_secret: str = "",
     ) -> None:
         model, device = load_embedding_model(model_weights_path)
         self.detector = FaceDetector(use_retinaface=use_retinaface)
@@ -41,6 +45,11 @@ class RealtimeCameraService:
         self.db_path = str(db_path)
         self.api_base_url = api_base_url.rstrip("/")
         self.last_marked_time: Dict[int, float] = {}
+        self.max_faces = max(1, min(int(max_faces), 8))
+        self.presence_interval_sec = max(0.2, float(presence_interval_sec))
+        self.camera_secret = (camera_secret or os.getenv("PARENTPING_CAMERA_SECRET", "")).strip()
+        self._last_presence_post = 0.0
+        self._warned_no_secret = False
 
     def _load_reference_embeddings(self) -> Tuple[Dict[int, np.ndarray], Dict[int, str]]:
         conn = sqlite3.connect(self.db_path)
@@ -77,6 +86,33 @@ class RealtimeCameraService:
             print(f"[ParentPing] mark_attendance failed: {exc}", flush=True)
             return
 
+    def _post_presence_api(self, student_ids: List[int]) -> None:
+        if not self.camera_secret:
+            if not self._warned_no_secret:
+                print(
+                    "[ParentPing] Live parent portal updates need PARENTPING_CAMERA_SECRET "
+                    "(same value on API and camera).",
+                    flush=True,
+                )
+                self._warned_no_secret = True
+            return
+        body = json.dumps({"student_ids": student_ids}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.api_base_url}/camera/presence",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Camera-Secret": self.camera_secret,
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                if resp.status != 200:
+                    print(f"[ParentPing] camera/presence HTTP {resp.status}", flush=True)
+        except Exception as exc:
+            print(f"[ParentPing] camera/presence failed: {exc}", flush=True)
+
     def _recognize_face(self, face_img: np.ndarray, references: Dict[int, np.ndarray]) -> RecognitionResult:
         embedding = self.extractor.extract(face_img)
         student_id, score = self.matcher.match(embedding, references)
@@ -98,37 +134,73 @@ class RealtimeCameraService:
                     continue
 
                 detections = self.detector.detect_faces(frame)
-                predicted_for_frame: Optional[int] = None
-                display_text = "Unknown"
+                primary_prediction: Optional[int] = None
+                visible_ids: List[int] = []
+                hud_lines: List[str] = []
 
                 if detections:
-                    x1, y1, x2, y2, _ = max(detections, key=lambda d: (d[2] - d[0]) * (d[3] - d[1]))
-                    face = frame[max(0, y1) : min(frame.shape[0], y2), max(0, x1) : min(frame.shape[1], x2)]
-                    if face.size > 0:
+                    sorted_dets = sorted(
+                        detections,
+                        key=lambda d: (d[2] - d[0]) * (d[3] - d[1]),
+                        reverse=True,
+                    )[: self.max_faces]
+
+                    for idx, (x1, y1, x2, y2, _) in enumerate(sorted_dets):
+                        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+                        face = frame[max(0, y1) : min(frame.shape[0], y2), max(0, x1) : min(frame.shape[1], x2)]
+                        if face.size == 0:
+                            continue
+
                         result = self._recognize_face(face, references)
-                        predicted_for_frame = result.student_id
+                        if idx == 0:
+                            primary_prediction = result.student_id
+
+                        label = "Unknown"
+                        color = (0, 165, 255)
                         if result.student_id is not None:
-                            display_text = f"{names.get(result.student_id, 'Student')} ({result.score:.3f})"
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                            visible_ids.append(int(result.student_id))
+                            label = f"{names.get(result.student_id, 'Student')} ({result.score:.2f})"
+                            color = (0, 255, 0)
 
-                confirmed_id = self.validator.add_prediction(predicted_for_frame)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                        cv2.putText(
+                            frame,
+                            label,
+                            (x1, max(20, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.55,
+                            color,
+                            2,
+                            cv2.LINE_AA,
+                        )
+                        hud_lines.append(label)
+
+                now = time.time()
+                if now - self._last_presence_post >= self.presence_interval_sec:
+                    unique_visible = sorted({sid for sid in visible_ids if sid > 0})
+                    self._post_presence_api(unique_visible)
+                    self._last_presence_post = now
+
+                confirmed_id = self.validator.add_prediction(primary_prediction)
                 if confirmed_id is not None:
-                    now = time.time()
+                    mark_now = time.time()
                     last = self.last_marked_time.get(confirmed_id, 0.0)
-                    if now - last > 30:
+                    if mark_now - last > 30:
                         self._mark_attendance_api(confirmed_id)
-                        self.last_marked_time[confirmed_id] = now
+                        self.last_marked_time[confirmed_id] = mark_now
 
+                status_hud = " | ".join(hud_lines) if hud_lines else "No face"
                 cv2.putText(
                     frame,
-                    display_text,
-                    (10, 30),
+                    status_hud[:120],
+                    (10, frame.shape[0] - 16),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0, 255, 0),
+                    0.55,
+                    (200, 255, 200),
                     2,
                     cv2.LINE_AA,
                 )
+
                 cv2.imshow("ParentPing Realtime Attendance", frame)
 
                 if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -166,6 +238,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Use RetinaFace detector if installed.",
     )
+    parser.add_argument(
+        "--max-faces",
+        type=int,
+        default=3,
+        help="Recognize up to this many faces per frame (largest boxes first).",
+    )
+    parser.add_argument(
+        "--presence-interval",
+        type=float,
+        default=0.45,
+        help="Seconds between live presence POSTs to the API.",
+    )
+    parser.add_argument(
+        "--camera-secret",
+        default=os.getenv("PARENTPING_CAMERA_SECRET", ""),
+        help="Must match API env PARENTPING_CAMERA_SECRET for live parent portal status.",
+    )
     args = parser.parse_args()
 
     service = RealtimeCameraService(
@@ -174,5 +263,8 @@ if __name__ == "__main__":
         api_base_url=args.api,
         threshold=args.threshold,
         use_retinaface=args.retinaface,
+        max_faces=args.max_faces,
+        presence_interval_sec=args.presence_interval,
+        camera_secret=args.camera_secret,
     )
     service.run()
