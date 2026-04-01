@@ -140,11 +140,13 @@ def run_app() -> None:
         """
         <style>
         .status-card {
-          border: 1px solid #dfe5ec;
+          border: 1px solid #1e293b;
           border-radius: 12px;
           padding: 12px 14px;
-          background: linear-gradient(180deg, #ffffff, #f8fafc);
+          background: linear-gradient(180deg, #0f172a, #111827);
+          color: #f8fafc;
         }
+        .status-card strong { color: #f8fafc; }
         .status-dot {
           display: inline-block;
           width: 10px;
