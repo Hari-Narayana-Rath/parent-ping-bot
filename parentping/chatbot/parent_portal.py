@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
+import extra_streamlit_components as stx
 import requests
 import streamlit as st
 
 
 DEFAULT_API_BASE_URL = os.getenv("PARENTPING_API_BASE_URL", "https://parentping-api.onrender.com")
 REQUEST_TIMEOUT_SECONDS = 75
+SESSION_COOKIE_KEY = "pp_parent_session_v1"
+POLL_INTERVAL = dt.timedelta(seconds=10)
+COOKIE_DAYS = 14
 
 
 def _clean_base_url(value: str) -> str:
@@ -99,6 +104,76 @@ def _init_state() -> None:
         st.session_state.roll_number = ""
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
+    if "_session_restored" not in st.session_state:
+        st.session_state._session_restored = False
+
+
+def _cookie_expires() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=COOKIE_DAYS)
+
+
+def _persist_session_cookie(cookie_manager: stx.CookieManager) -> None:
+    payload = {
+        "token": st.session_state.parent_token,
+        "student_id": st.session_state.student_id,
+        "student_name": st.session_state.student_name,
+        "roll_number": st.session_state.roll_number,
+        "api_base_url": st.session_state.api_base_url,
+    }
+    try:
+        cookie_manager.set(
+            SESSION_COOKIE_KEY,
+            json.dumps(payload),
+            expires_at=_cookie_expires(),
+        )
+    except Exception:
+        pass
+
+
+def _clear_session_cookie(cookie_manager: stx.CookieManager) -> None:
+    try:
+        cookie_manager.delete(SESSION_COOKIE_KEY)
+    except Exception:
+        pass
+
+
+def _apply_session_payload(data: Dict[str, Any]) -> None:
+    st.session_state.parent_token = str(data.get("token") or "")
+    sid = data.get("student_id")
+    st.session_state.student_id = int(sid) if sid is not None else None
+    st.session_state.student_name = str(data.get("student_name") or "")
+    st.session_state.roll_number = str(data.get("roll_number") or "")
+    api = data.get("api_base_url")
+    if api and _is_valid_http_url(_clean_base_url(str(api))):
+        st.session_state.api_base_url = _clean_base_url(str(api))
+
+
+def _try_restore_session_from_cookie(cookie_manager: stx.CookieManager) -> None:
+    if st.session_state.parent_token or st.session_state._session_restored:
+        return
+    raw = cookie_manager.get(SESSION_COOKIE_KEY)
+    if not raw:
+        st.session_state._session_restored = True
+        return
+    try:
+        data = json.loads(raw)
+    except Exception:
+        st.session_state._session_restored = True
+        return
+    if not data.get("token") or data.get("student_id") is None:
+        st.session_state._session_restored = True
+        return
+    _apply_session_payload(data)
+    try:
+        sid = int(st.session_state.student_id)
+        _request_json("GET", f"/attendance/{sid}/today", token=st.session_state.parent_token)
+    except Exception:
+        st.session_state.parent_token = ""
+        st.session_state.student_id = None
+        st.session_state.student_name = ""
+        st.session_state.roll_number = ""
+        _clear_session_cookie(cookie_manager)
+    st.session_state._session_restored = True
 
 
 def _send_query(query: str) -> None:
@@ -110,23 +185,30 @@ def _send_query(query: str) -> None:
         st.session_state.chat_messages.append(("assistant", f"Error: {exc}"))
 
 
-def _get_classroom_status() -> tuple[bool, str]:
-    if not st.session_state.student_id:
-        return False, "No"
+def _fetch_today_snapshot() -> Optional[Dict[str, Any]]:
+    if not st.session_state.student_id or not st.session_state.parent_token:
+        return None
     try:
-        records = _get_json(
-            f"/attendance/{st.session_state.student_id}",
+        return _get_json(
+            f"/attendance/{st.session_state.student_id}/today",
             token=st.session_state.parent_token,
         )
     except Exception:
-        return False, "No"
+        return None
 
-    today = dt.date.today().isoformat()
-    for record in records:
-        if record.get("date") == today:
-            in_class = record.get("time_out") in (None, "", "null")
-            return in_class, "Yes" if in_class else "No"
+
+def _snapshot_to_classroom_label(snap: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
+    if not snap:
+        return False, "Unknown"
+    if not snap.get("has_record"):
+        return False, "No"
+    if snap.get("in_class"):
+        return True, "Yes"
     return False, "No"
+
+
+def _fragment_supported() -> bool:
+    return hasattr(st, "fragment")
 
 
 def run_app() -> None:
@@ -134,7 +216,7 @@ def run_app() -> None:
 
     st.set_page_config(page_title="ParentPing Chat Bot", layout="wide")
     st.title("ParentPing Chat Bot")
-    st.caption("Parent-only attendance assistant")
+    st.caption("Parent-only attendance assistant — session persists across reloads; status updates automatically.")
 
     st.markdown(
         """
@@ -165,6 +247,9 @@ def run_app() -> None:
         unsafe_allow_html=True,
     )
 
+    cookie_manager = stx.CookieManager(key="parentping_parent_cookie_v1")
+    _try_restore_session_from_cookie(cookie_manager)
+
     with st.sidebar:
         st.markdown("### Connection")
         api_input = st.text_input("Backend API URL", value=st.session_state.api_base_url)
@@ -174,9 +259,12 @@ def run_app() -> None:
                 st.error("Enter a valid URL (http/https).")
             else:
                 st.session_state.api_base_url = cleaned_url
+                if st.session_state.parent_token:
+                    _persist_session_cookie(cookie_manager)
                 st.success("Backend URL updated.")
                 st.rerun()
         st.caption(f"Current: `{st.session_state.api_base_url or 'Not set'}`")
+        st.caption("Tip: Open this app on your phone; run the camera app only on the classroom PC.")
 
     if not st.session_state.api_base_url:
         st.error("Application backend is not configured. Contact the administrator.")
@@ -200,10 +288,11 @@ def run_app() -> None:
                     st.session_state.chat_messages = [
                         ("assistant", "Login successful. You can now ask about your ward's attendance.")
                     ]
+                    _persist_session_cookie(cookie_manager)
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
-        st.info("Use the student roll number and the password given by the admin.")
+        st.info("Use the student roll number and the password given by the admin. Your session is saved in this browser.")
         return
 
     head_left, head_right = st.columns([4, 1])
@@ -219,19 +308,40 @@ def run_app() -> None:
             st.session_state.student_name = ""
             st.session_state.roll_number = ""
             st.session_state.chat_messages = []
+            _clear_session_cookie(cookie_manager)
             st.rerun()
 
-    in_class, label = _get_classroom_status()
-    color = "#1f9d55" if in_class else "#e03131"
-    st.markdown(
-        f"""
-        <div class="status-card">
-          <span class="status-dot" style="background:{color};"></span>
-          <strong>Student In Classroom:</strong> {label}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    def _render_status_card(snap: Optional[Dict[str, Any]]) -> None:
+        in_class, label = _snapshot_to_classroom_label(snap)
+        color = "#1f9d55" if in_class else "#e03131"
+        extra = ""
+        if snap and snap.get("has_record") and snap.get("time_in"):
+            tin = snap.get("time_in", "")
+            tout = snap.get("time_out") or "—"
+            extra = f"<br/><small>In: {tin} · Out: {tout}</small>"
+        st.markdown(
+            f"""
+            <div class="status-card">
+              <span class="status-dot" style="background:{color};"></span>
+              <strong>Student In Classroom:</strong> {label}{extra}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if _fragment_supported():
+        @st.fragment(run_every=POLL_INTERVAL)
+        def _live_status() -> None:
+            snap = _fetch_today_snapshot()
+            _render_status_card(snap)
+
+        _live_status()
+        st.caption(f"Status refreshes about every {int(POLL_INTERVAL.total_seconds())} seconds from the API.")
+    else:
+        snap = _fetch_today_snapshot()
+        _render_status_card(snap)
+        if st.button("Refresh classroom status"):
+            st.rerun()
 
     prompt_cols = st.columns(4)
     prompts = [

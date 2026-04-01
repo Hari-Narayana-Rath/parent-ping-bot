@@ -358,6 +358,44 @@ def get_attendance_history(
     ]
 
 
+@router.get("/attendance/{student_id}/today")
+def get_attendance_today(
+    student_id: int,
+    parent: Parent = Depends(_get_current_parent),
+    db: Session = Depends(get_db),
+):
+    """Lightweight snapshot for polling (in-class status) without full history."""
+    if parent.student_id != student_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this student.")
+
+    today = dt.datetime.now().date()
+    rec = (
+        db.query(Attendance)
+        .filter(Attendance.student_id == student_id, Attendance.date == today)
+        .order_by(Attendance.time_in.desc())
+        .first()
+    )
+    if not rec:
+        return {
+            "date": today.isoformat(),
+            "has_record": False,
+            "time_in": None,
+            "time_out": None,
+            "status": None,
+            "in_class": False,
+        }
+    time_out = rec.time_out.isoformat() if rec.time_out else None
+    in_class = rec.time_out is None
+    return {
+        "date": rec.date.isoformat(),
+        "has_record": True,
+        "time_in": rec.time_in.isoformat(),
+        "time_out": time_out,
+        "status": rec.status,
+        "in_class": in_class,
+    }
+
+
 @router.post("/login_parent")
 def login_parent(request: ParentLoginRequest, db: Session = Depends(get_db)):
     student = db.query(Student).filter(Student.roll_number == request.roll_number.strip()).first()

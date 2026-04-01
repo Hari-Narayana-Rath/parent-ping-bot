@@ -13,3 +13,4 @@ email-validator
 streamlit
 python-multipart
 requests
+extra-streamlit-components
