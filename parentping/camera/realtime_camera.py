@@ -30,7 +30,7 @@ class RealtimeCameraService:
         self,
         model_weights_path: str | Path = "best_resnet18_arcface_parentping.pth",
         db_path: str | Path = "parentping.db",
-        api_base_url: str = "http://127.0.0.1:8000",
+        api_base_url: str = "https://parentping-api.onrender.com",
         threshold: float = 0.125,
         use_retinaface: bool = False,
         max_faces: int = 3,
@@ -224,7 +224,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--api",
-        default="http://127.0.0.1:8000",
+        default="https://parentping-api.onrender.com",
         help="FastAPI base URL for attendance marking.",
     )
     parser.add_argument(
@@ -268,3 +268,4 @@ if __name__ == "__main__":
         camera_secret=args.camera_secret,
     )
     service.run()
+

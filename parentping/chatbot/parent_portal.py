@@ -202,10 +202,10 @@ def _snapshot_to_classroom_label(snap: Optional[Dict[str, Any]]) -> Tuple[bool, 
         return False, "Unknown"
     if snap.get("live_tracking_enabled"):
         if not snap.get("camera_active"):
-            return False, "Camera offline — PC must POST to same API URL as this app"
+            return False, "Camera offline"
         if snap.get("student_visible_live"):
             return True, "Yes — seen on webcam now"
-        return False, "No — not in webcam view"
+        return False, "No — student left camera view"
     if not snap.get("has_record"):
         return False, "No attendance yet (live webcam needs secret on API — see below)"
     if snap.get("in_class"):
@@ -396,3 +396,4 @@ def run_app() -> None:
 
 if __name__ == "__main__":
     run_app()
+

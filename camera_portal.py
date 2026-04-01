@@ -71,7 +71,7 @@ def run_camera_portal() -> None:
 
     cookie_manager = stx.CookieManager(key="parentping_camera_cookie_v1")
 
-    default_api = os.getenv("PARENTPING_API_BASE_URL", "http://127.0.0.1:8000")
+    default_api = os.getenv("PARENTPING_API_BASE_URL", "https://parentping-api.onrender.com")
     defaults = {
         "api_url": default_api,
         "weights_path": "best_resnet18_arcface_parentping.pth",
@@ -161,3 +161,4 @@ def run_camera_portal() -> None:
 
 if __name__ == "__main__":
     run_camera_portal()
+

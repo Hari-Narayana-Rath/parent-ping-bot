@@ -44,7 +44,7 @@ def _get_camera_secret() -> str:
     return os.getenv("PARENTPING_CAMERA_SECRET", "").strip()
 
 
-PRESENCE_TTL_SEC = float(os.getenv("PARENTPING_PRESENCE_TTL_SEC", "3.5"))
+PRESENCE_TTL_SEC = float(os.getenv("PARENTPING_PRESENCE_TTL_SEC", "3"))
 CAMERA_STALE_SEC = float(os.getenv("PARENTPING_CAMERA_STALE_SEC", "12"))
 
 PRESENCE_LOCK = threading.Lock()
@@ -652,3 +652,4 @@ def chatbot_query(
 ):
     response = handle_chatbot_query(request.query, parent.student_id, db)
     return {"response": response}
+
