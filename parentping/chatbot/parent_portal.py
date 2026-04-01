@@ -1,25 +1,46 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import time
 from typing import Any, Dict
+from urllib.parse import urlparse
 
 import requests
 import streamlit as st
 
 
-API_BASE_URL = "https://parentping-api.onrender.com"
+DEFAULT_API_BASE_URL = os.getenv("PARENTPING_API_BASE_URL", "https://parentping-api.onrender.com")
 REQUEST_TIMEOUT_SECONDS = 75
 
 
-def _request_json(method: str, path: str, token: str | None = None, **kwargs: Any) -> Any:
-    if not API_BASE_URL:
+def _clean_base_url(value: str) -> str:
+    return value.strip().rstrip("/")
+
+
+def _is_valid_http_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _request_json(
+    method: str,
+    path: str,
+    token: str | None = None,
+    base_url: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    resolved_base_url = _clean_base_url(base_url or st.session_state.api_base_url)
+    if not resolved_base_url:
         raise RuntimeError("API Base URL is not configured.")
     headers = kwargs.pop("headers", {})
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    url = f"{API_BASE_URL}{path}"
+    url = f"{resolved_base_url}{path}"
     last_error: Exception | None = None
     for attempt in range(2):
         try:
@@ -66,6 +87,8 @@ def _get_json(path: str, token: str | None = None) -> Any:
 
 
 def _init_state() -> None:
+    if "api_base_url" not in st.session_state:
+        st.session_state.api_base_url = _clean_base_url(DEFAULT_API_BASE_URL)
     if "parent_token" not in st.session_state:
         st.session_state.parent_token = ""
     if "student_id" not in st.session_state:
@@ -140,7 +163,20 @@ def run_app() -> None:
         unsafe_allow_html=True,
     )
 
-    if not API_BASE_URL:
+    with st.sidebar:
+        st.markdown("### Connection")
+        api_input = st.text_input("Backend API URL", value=st.session_state.api_base_url)
+        if st.button("Update API URL"):
+            cleaned_url = _clean_base_url(api_input)
+            if not _is_valid_http_url(cleaned_url):
+                st.error("Enter a valid URL (http/https).")
+            else:
+                st.session_state.api_base_url = cleaned_url
+                st.success("Backend URL updated.")
+                st.rerun()
+        st.caption(f"Current: `{st.session_state.api_base_url or 'Not set'}`")
+
+    if not st.session_state.api_base_url:
         st.error("Application backend is not configured. Contact the administrator.")
         return
 

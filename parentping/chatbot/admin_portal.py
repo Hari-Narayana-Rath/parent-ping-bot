@@ -2,23 +2,44 @@ from __future__ import annotations
 
 import time
 from typing import Any, Dict
+import os
+from urllib.parse import urlparse
 
 import requests
 import streamlit as st
 
 
-API_BASE_URL = "https://parentping-api.onrender.com"
+DEFAULT_API_BASE_URL = os.getenv("PARENTPING_API_BASE_URL", "https://parentping-api.onrender.com")
 REQUEST_TIMEOUT_SECONDS = 75
 
 
-def _request_json(method: str, path: str, token: str | None = None, **kwargs: Any) -> Any:
-    if not API_BASE_URL:
+def _clean_base_url(value: str) -> str:
+    return value.strip().rstrip("/")
+
+
+def _is_valid_http_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _request_json(
+    method: str,
+    path: str,
+    token: str | None = None,
+    base_url: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    resolved_base_url = _clean_base_url(base_url or st.session_state.api_base_url)
+    if not resolved_base_url:
         raise RuntimeError("API Base URL is not configured.")
     headers = kwargs.pop("headers", {})
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    url = f"{API_BASE_URL}{path}"
+    url = f"{resolved_base_url}{path}"
     last_error: Exception | None = None
     for attempt in range(2):
         try:
@@ -80,6 +101,8 @@ def _delete_student(student_id: int, token: str) -> str:
 
 
 def _init_state() -> None:
+    if "api_base_url" not in st.session_state:
+        st.session_state.api_base_url = _clean_base_url(DEFAULT_API_BASE_URL)
     if "admin_token" not in st.session_state:
         st.session_state.admin_token = ""
 
@@ -91,7 +114,20 @@ def run_app() -> None:
     st.title("ParentPing Admin")
     st.caption("Admin-only student management portal")
 
-    if not API_BASE_URL:
+    with st.sidebar:
+        st.markdown("### Connection")
+        api_input = st.text_input("Backend API URL", value=st.session_state.api_base_url)
+        if st.button("Update API URL"):
+            cleaned_url = _clean_base_url(api_input)
+            if not _is_valid_http_url(cleaned_url):
+                st.error("Enter a valid URL (http/https).")
+            else:
+                st.session_state.api_base_url = cleaned_url
+                st.success("Backend URL updated.")
+                st.rerun()
+        st.caption(f"Current: `{st.session_state.api_base_url or 'Not set'}`")
+
+    if not st.session_state.api_base_url:
         st.error("Application backend is not configured.")
         return
 
@@ -133,22 +169,31 @@ def run_app() -> None:
             if not all([name.strip(), roll_number.strip(), parent_email.strip(), parent_password.strip(), video_file]):
                 st.error("All fields and a student video are required.")
             else:
-                response = requests.post(
-                    f"{API_BASE_URL}/register_student_from_video",
-                    headers={"Authorization": f"Bearer {st.session_state.admin_token}"},
-                    data={
-                        "name": name.strip(),
-                        "roll_number": roll_number.strip(),
-                        "parent_email": parent_email.strip(),
-                        "parent_password": parent_password,
-                    },
-                    files={"video": (video_file.name, video_file.getvalue(), video_file.type or "video/mp4")},
-                    timeout=300,
-                )
-                if response.ok:
-                    st.success(response.json().get("message", "Student registered successfully."))
-                else:
-                    st.error(_response_detail(response))
+                try:
+                    with st.spinner("Processing video and generating embedding..."):
+                        response = requests.post(
+                            f"{st.session_state.api_base_url}/register_student_from_video",
+                            headers={"Authorization": f"Bearer {st.session_state.admin_token}"},
+                            data={
+                                "name": name.strip(),
+                                "roll_number": roll_number.strip(),
+                                "parent_email": parent_email.strip(),
+                                "parent_password": parent_password,
+                            },
+                            files={"video": (video_file.name, video_file.getvalue(), video_file.type or "video/mp4")},
+                            timeout=300,
+                        )
+                    if response.ok:
+                        st.success(response.json().get("message", "Student registered successfully."))
+                    else:
+                        st.error(_response_detail(response))
+                except requests.exceptions.Timeout:
+                    st.error(
+                        "The request timed out while processing video. "
+                        "Try a shorter/clearer clip or retry after backend warm-up."
+                    )
+                except requests.exceptions.RequestException as exc:
+                    st.error(f"Network error while contacting backend: {exc}")
 
     st.markdown("**Manage Students**")
     try:
