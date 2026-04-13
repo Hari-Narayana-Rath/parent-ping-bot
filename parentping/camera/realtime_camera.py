@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import time
+import threading
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,9 @@ class RealtimeCameraService:
         self.camera_secret = (camera_secret or os.getenv("PARENTPING_CAMERA_SECRET", "")).strip()
         self._last_presence_post = 0.0
         self._warned_no_secret = False
+        self._pending_attendance_posts: set[int] = set()
+        self._last_attendance_error = 0.0
+        self._last_presence_error = 0.0
 
     def _load_reference_embeddings(self) -> Tuple[Dict[int, np.ndarray], Dict[int, str]]:
         conn = sqlite3.connect(self.db_path)
@@ -70,21 +74,37 @@ class RealtimeCameraService:
         return embeddings, names
 
     def _mark_attendance_api(self, student_id: int) -> None:
-        payload = json.dumps({"student_id": student_id}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self.api_base_url}/mark_attendance",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status != 200:
+            payload = json.dumps({"student_id": student_id}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self.api_base_url}/mark_attendance",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                if resp.status == 200:
+                    print(f"[ParentPing] attendance synced for student ID {student_id}", flush=True)
+                else:
                     print(f"[ParentPing] mark_attendance HTTP {resp.status}", flush=True)
-                return
         except Exception as exc:
-            print(f"[ParentPing] mark_attendance failed: {exc}", flush=True)
+            now = time.time()
+            if now - self._last_attendance_error > 10:
+                print(
+                    f"[ParentPing] mark_attendance failed: {exc}. "
+                    "If Render was sleeping, keep the camera running and it will retry on the next confirmed face.",
+                    flush=True,
+                )
+                self._last_attendance_error = now
+        finally:
+            self._pending_attendance_posts.discard(student_id)
+
+    def _queue_mark_attendance_api(self, student_id: int) -> None:
+        if student_id in self._pending_attendance_posts:
             return
+        self._pending_attendance_posts.add(student_id)
+        thread = threading.Thread(target=self._mark_attendance_api, args=(student_id,), daemon=True)
+        thread.start()
 
     def _post_presence_api(self, student_ids: List[int]) -> None:
         if not self.camera_secret:
@@ -107,11 +127,14 @@ class RealtimeCameraService:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=8) as resp:
+            with urllib.request.urlopen(req, timeout=20) as resp:
                 if resp.status != 200:
                     print(f"[ParentPing] camera/presence HTTP {resp.status}", flush=True)
         except Exception as exc:
-            print(f"[ParentPing] camera/presence failed: {exc}", flush=True)
+            now = time.time()
+            if now - self._last_presence_error > 10:
+                print(f"[ParentPing] camera/presence failed: {exc}", flush=True)
+                self._last_presence_error = now
 
     def _recognize_face(self, face_img: np.ndarray, references: Dict[int, np.ndarray]) -> RecognitionResult:
         embedding = self.extractor.extract(face_img)
@@ -186,7 +209,7 @@ class RealtimeCameraService:
                     mark_now = time.time()
                     last = self.last_marked_time.get(confirmed_id, 0.0)
                     if mark_now - last > 30:
-                        self._mark_attendance_api(confirmed_id)
+                        self._queue_mark_attendance_api(confirmed_id)
                         self.last_marked_time[confirmed_id] = mark_now
 
                 status_hud = " | ".join(hud_lines) if hud_lines else "No face"
