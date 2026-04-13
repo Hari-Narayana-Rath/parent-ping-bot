@@ -154,46 +154,17 @@ def run_app() -> None:
             st.rerun()
 
     st.markdown("**Register Student**")
-    with st.form("register_student_form"):
-        name = st.text_input("Student Name")
-        roll_number = st.text_input("Roll Number")
-        parent_email = st.text_input("Parent Email")
-        parent_password = st.text_input("Parent Portal Password", type="password")
-        video_file = st.file_uploader(
-            "Student Face Video",
-            type=["mp4", "avi", "mov", "mkv", "webm"],
-            key="admin_register_video",
-        )
-        submitted = st.form_submit_button("Register Student")
-        if submitted:
-            if not all([name.strip(), roll_number.strip(), parent_email.strip(), parent_password.strip(), video_file]):
-                st.error("All fields and a student video are required.")
-            else:
-                try:
-                    with st.spinner("Processing video and generating embedding..."):
-                        response = requests.post(
-                            f"{st.session_state.api_base_url}/register_student_from_video",
-                            headers={"Authorization": f"Bearer {st.session_state.admin_token}"},
-                            data={
-                                "name": name.strip(),
-                                "roll_number": roll_number.strip(),
-                                "parent_email": parent_email.strip(),
-                                "parent_password": parent_password,
-                            },
-                            files={"video": (video_file.name, video_file.getvalue(), video_file.type or "video/mp4")},
-                            timeout=300,
-                        )
-                    if response.ok:
-                        st.success(response.json().get("message", "Student registered successfully."))
-                    else:
-                        st.error(_response_detail(response))
-                except requests.exceptions.Timeout:
-                    st.error(
-                        "The request timed out while processing video. "
-                        "Try a shorter/clearer clip or retry after backend warm-up."
-                    )
-                except requests.exceptions.RequestException as exc:
-                    st.error(f"Network error while contacting backend: {exc}")
+    st.warning(
+        "Video-based student registration is disabled on the hosted Render free instance because "
+        "PyTorch video processing exceeds the 512MB memory limit. Register new students from the "
+        "classroom/local PC using `tools/register_student_local.py`, then refresh this page."
+    )
+    st.code(
+        'python tools/register_student_local.py --video "student.mp4" --name "Student Name" '
+        '--roll-number "ROLL001" --parent-email "parent@example.com" '
+        '--parent-password "parent_password" --admin-email "your-admin-email"',
+        language="powershell",
+    )
 
     st.markdown("**Manage Students**")
     try:

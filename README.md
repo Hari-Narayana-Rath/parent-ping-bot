@@ -189,6 +189,19 @@ Important:
 streamlit run camera_portal.py
 ```
 
+
+## Registering New Students on Render Free Tier
+
+Render free instances have a 512MB memory limit. Processing a face video with PyTorch on Render can crash the service with `HTTP 502` / `Ran out of memory`. For that reason, do not register students from video directly on the hosted API.
+
+Use the local registration tool instead. It extracts the embedding on your PC and sends only the 512D embedding to Render.
+
+```powershell
+python tools/register_student_local.py --video "student.mp4" --name "Student Name" --roll-number "ROLL001" --parent-email "parent@example.com" --parent-password "parent_password" --admin-email "your-admin-email"
+```
+
+You will be asked for the admin password securely. After it succeeds, refresh the admin portal and the new student will appear.
+
 ## Streamlit Deployment
 
 Create two Streamlit apps from the same repository.
