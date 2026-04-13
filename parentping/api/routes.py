@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from parentping.chatbot.chatbot_logic import handle_chatbot_query
 from parentping.database.db import get_db
 from parentping.timeutil import calendar_today_in_display_tz, format_iso_ist, utc_now_naive
-from parentping.database.models import Attendance, Parent, Student, serialize_embedding
+from parentping.database.models import Attendance, Parent, Student, deserialize_embedding, serialize_embedding
 from parentping.models.embedding_model import load_embedding_model
 from parentping.recognition.embedding_extractor import EmbeddingExtractor
 from parentping.recognition.face_detector import FaceDetector
@@ -382,6 +382,30 @@ def mark_attendance(request: MarkAttendanceRequest, db: Session = Depends(get_db
         return {"message": "Attendance already marked (still checked in).", "attendance_id": existing.id}
 
     return {"message": "Attendance already completed for today.", "attendance_id": existing.id}
+
+
+@router.get("/camera/students")
+def camera_students(x_camera_secret: str | None = Header(default=None, alias="X-Camera-Secret"), db: Session = Depends(get_db)):
+    """Return student embeddings to the trusted classroom camera process only."""
+    secret = _get_camera_secret()
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Set PARENTPING_CAMERA_SECRET on the API to enable camera student sync.",
+        )
+    if not x_camera_secret or x_camera_secret != secret:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Camera-Secret.")
+
+    students = db.query(Student).order_by(Student.id.asc()).all()
+    return [
+        {
+            "id": student.id,
+            "name": student.name,
+            "roll_number": student.roll_number,
+            "embedding": deserialize_embedding(student.embedding_vector).tolist(),
+        }
+        for student in students
+    ]
 
 
 @router.post("/camera/presence")

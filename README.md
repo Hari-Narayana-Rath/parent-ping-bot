@@ -280,11 +280,16 @@ Check all of these:
 3. The camera secret matches `PARENTPING_CAMERA_SECRET` on Render.
 4. The parent Streamlit app has been rebooted after the latest GitHub update.
 
+### Camera detects only old/local students
+1. Redeploy Render after the latest GitHub push so `/camera/students` is available.
+2. Run the camera with the same secret as Render: `--camera-secret "<your-camera-secret>"`.
+3. The camera will load student embeddings from Render first and fall back to `parentping.db` only if backend sync fails.
+
 ### Camera detects a face but parent portal does not update
 1. Make sure the camera command is using the Render API URL.
-2. Make sure the student exists in the same backend database used by the portals.
-3. Make sure the camera secret matches the Render backend secret.
-4. Reboot the parent Streamlit app after pushing changes.
+2. Make sure the camera secret matches `PARENTPING_CAMERA_SECRET` on Render.
+3. Reboot the parent Streamlit app after pushing changes.
+4. Check the terminal for `loaded X student embeddings from backend API`.
 
 ### Student does not switch to out quickly enough
 1. Confirm Render has `PARENTPING_PRESENCE_TTL_SEC=3`.

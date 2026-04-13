@@ -55,7 +55,7 @@ class RealtimeCameraService:
         self._last_attendance_error = 0.0
         self._last_presence_error = 0.0
 
-    def _load_reference_embeddings(self) -> Tuple[Dict[int, np.ndarray], Dict[int, str]]:
+    def _load_reference_embeddings_from_db(self) -> Tuple[Dict[int, np.ndarray], Dict[int, str]]:
         conn = sqlite3.connect(self.db_path)
         try:
             cur = conn.cursor()
@@ -72,6 +72,65 @@ class RealtimeCameraService:
                 embeddings[int(student_id)] = vec
                 names[int(student_id)] = str(name)
         return embeddings, names
+
+    def _load_reference_embeddings_from_api(self) -> Tuple[Dict[int, np.ndarray], Dict[int, str]]:
+        if not self.camera_secret:
+            raise RuntimeError("camera secret is required for backend embedding sync")
+        req = urllib.request.Request(
+            f"{self.api_base_url}/camera/students",
+            headers={"X-Camera-Secret": self.camera_secret},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+
+        embeddings: Dict[int, np.ndarray] = {}
+        names: Dict[int, str] = {}
+        if not isinstance(payload, list):
+            raise RuntimeError("camera/students returned an invalid payload")
+
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            try:
+                student_id = int(item["id"])
+                name = str(item.get("name") or "Student")
+                vec = np.asarray(item.get("embedding", []), dtype=np.float32)
+            except Exception:
+                continue
+            if vec.size == 512:
+                embeddings[student_id] = vec
+                names[student_id] = name
+        return embeddings, names
+
+    def _load_reference_embeddings(self) -> Tuple[Dict[int, np.ndarray], Dict[int, str]]:
+        errors: list[str] = []
+        if self.camera_secret:
+            try:
+                embeddings, names = self._load_reference_embeddings_from_api()
+                if embeddings:
+                    print(f"[ParentPing] loaded {len(embeddings)} student embeddings from backend API", flush=True)
+                    return embeddings, names
+                errors.append("backend API returned no embeddings")
+            except Exception as exc:
+                errors.append(f"backend API sync failed: {exc}")
+        else:
+            errors.append("camera secret not provided; backend embedding sync skipped")
+
+        try:
+            embeddings, names = self._load_reference_embeddings_from_db()
+            if embeddings:
+                print(
+                    f"[ParentPing] loaded {len(embeddings)} student embeddings from local DB. "
+                    f"Backend sync was not used ({'; '.join(errors)}).",
+                    flush=True,
+                )
+                return embeddings, names
+            errors.append("local DB returned no embeddings")
+        except Exception as exc:
+            errors.append(f"local DB failed: {exc}")
+
+        raise RuntimeError("No student embeddings available. " + " | ".join(errors))
 
     def _mark_attendance_api(self, student_id: int) -> None:
         try:
