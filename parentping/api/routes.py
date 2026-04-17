@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 from typing import Any, List
 
-import cv2
 import numpy as np
+# Lazy import: cv2 is imported inside functions
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -24,9 +24,7 @@ from parentping.chatbot.chatbot_logic import handle_chatbot_query
 from parentping.database.db import get_db
 from parentping.timeutil import calendar_today_in_display_tz, format_iso_ist, utc_now_naive
 from parentping.database.models import Attendance, Parent, Student, deserialize_embedding, serialize_embedding
-from parentping.models.embedding_model import load_embedding_model
-from parentping.recognition.embedding_extractor import EmbeddingExtractor
-from parentping.recognition.face_detector import FaceDetector
+# Lazy import: load_embedding_model, EmbeddingExtractor, FaceDetector are imported inside functions
 
 
 router = APIRouter()
@@ -34,6 +32,10 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login_parent")
 
 SECRET_KEY = os.getenv("PARENTPING_SECRET_KEY", "change-me-in-production")
+if SECRET_KEY == "change-me-in-production":
+    import warnings
+    warnings.warn("Using default PARENTPING_SECRET_KEY. This is insecure for production.")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 MODEL_PATH = os.getenv("PARENTPING_MODEL_PATH", "best_resnet18_arcface_parentping.pth")
@@ -226,6 +228,9 @@ def _get_recognition_components() -> tuple[FaceDetector, EmbeddingExtractor]:
     global _detector, _extractor
     if _detector is None or _extractor is None:
         try:
+            from parentping.models.embedding_model import load_embedding_model
+            from parentping.recognition.embedding_extractor import EmbeddingExtractor
+            from parentping.recognition.face_detector import FaceDetector
             model, device = load_embedding_model(MODEL_PATH)
         except FileNotFoundError:
             raise HTTPException(
@@ -238,6 +243,7 @@ def _get_recognition_components() -> tuple[FaceDetector, EmbeddingExtractor]:
 
 
 def _embedding_from_video(video_path: Path) -> np.ndarray:
+    import cv2
     detector, extractor = _get_recognition_components()
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -676,4 +682,3 @@ def chatbot_query(
 ):
     response = handle_chatbot_query(request.query, parent.student_id, db)
     return {"response": response}
-
